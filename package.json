@@ -1,4 +1,3 @@
-cat > package.json << 'EOF'
 {
   "name": "fresh-farm-produce",
   "version": "1.0.0",
@@ -11,4 +10,3 @@ cat > package.json << 'EOF'
     "node": ">=14.0.0"
   }
 }
-EOF
