@@ -1,0 +1,12 @@
+{
+  "name": "fresh-farm-produce",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "cd server && npm start",
+    "build": "cd client && npm run build",
+    "install-all": "cd server && npm install && cd ../client && npm install"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

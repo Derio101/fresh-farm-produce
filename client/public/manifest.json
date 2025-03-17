@@ -1,0 +1,40 @@
+{
+  "short_name": "Fresh Farm",
+  "name": "Fresh Farm Produce",
+  "description": "Fresh Farm Produce connects customers with organic farm products",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "logo192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1b5e20",
+  "background_color": "#f0f9f0",
+  "orientation": "portrait",
+  "scope": "/",
+  "categories": ["food", "shopping", "agriculture"],
+  "screenshots": [
+    {
+      "src": "screenshot1.png",
+      "sizes": "1280x720",
+      "type": "image/png"
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
+}
