@@ -21,6 +21,22 @@ const API_ROUTES = [
   '/api/form'
 ];
 
+// Cache expiration times (in seconds)
+const CACHE_TIMES = {
+  STATIC: 365 * 24 * 60 * 60, // 1 year
+  IMAGES: 30 * 24 * 60 * 60,  // 30 days
+  API: 24 * 60 * 60,          // 1 day
+  HTML: 0                     // No cache for HTML (always get fresh)
+};
+
+// Resource types for different caching strategies
+const RESOURCE_TYPES = {
+  API: 'api',
+  IMAGE: 'image',
+  HTML: 'html',
+  STATIC: 'static'
+};
+
 // Install event - precache static assets
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -37,140 +53,235 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   const currentCaches = [CACHE_NAME, RUNTIME_CACHE];
   event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          if (!currentCaches.includes(cacheName)) {
-            console.log('[ServiceWorker] Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => {
-      console.log('[ServiceWorker] Claiming clients');
-      return self.clients.claim(); // Take control of all clients
-    })
+    caches.keys()
+      .then(cacheNames => {
+        return Promise.all(
+          cacheNames
+            .filter(cacheName => !currentCaches.includes(cacheName))
+            .map(cacheName => {
+              console.log('[ServiceWorker] Deleting old cache:', cacheName);
+              return caches.delete(cacheName);
+            })
+        );
+      })
+      .then(() => {
+        console.log('[ServiceWorker] Claiming clients');
+        return self.clients.claim(); // Important for bfcache support
+      })
   );
 });
 
-// Helper function to determine if a request is for API
-const isApiRequest = (url) => {
-  return API_ROUTES.some(route => url.pathname.includes(route));
-};
-
-// Helper function to determine if a request is for an image
-const isImageRequest = (url) => {
-  return url.pathname.endsWith('.png') || 
-         url.pathname.endsWith('.jpg') || 
-         url.pathname.endsWith('.jpeg') || 
-         url.pathname.endsWith('.svg') || 
-         url.pathname.endsWith('.gif');
-};
-
-// Fetch event - network-first for API, cache-first for assets
-self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+/**
+ * Determine the resource type of a request
+ * @param {Request} request - The fetch request
+ * @returns {string} Resource type
+ */
+function getResourceType(request) {
+  const url = new URL(request.url);
   
+  // Check if this is an API request
+  if (API_ROUTES.some(route => url.pathname.includes(route))) {
+    return RESOURCE_TYPES.API;
+  }
+  
+  // Check if this is an image request
+  if (url.pathname.match(/\.(png|jpg|jpeg|svg|gif|webp)$/i)) {
+    return RESOURCE_TYPES.IMAGE;
+  }
+  
+  // Check if this is a HTML navigation request
+  if (request.mode === 'navigate') {
+    return RESOURCE_TYPES.HTML;
+  }
+  
+  // Default to static resource (JS, CSS, etc.)
+  return RESOURCE_TYPES.STATIC;
+}
+
+/**
+ * Create a response with proper cache headers
+ * @param {Response} response - Original response
+ * @param {string} resourceType - Type of resource
+ * @returns {Response} Enhanced response with cache headers
+ */
+function createCacheableResponse(response, resourceType) {
+  if (!response || !response.ok) {
+    return response;
+  }
+  
+  const cacheTime = CACHE_TIMES[resourceType] || 0;
+  
+  // Skip enhancing if no cache time
+  if (cacheTime === 0) {
+    return response;
+  }
+  
+  // Clone the response
+  const responseClone = response.clone();
+  const headers = new Headers(responseClone.headers);
+  
+  // Set appropriate Cache-Control header
+  if (resourceType === RESOURCE_TYPES.STATIC) {
+    // Use immutable for hashed static resources for best performance
+    headers.set('Cache-Control', `public, max-age=${cacheTime}, immutable`);
+  } else {
+    headers.set('Cache-Control', `public, max-age=${cacheTime}`);
+  }
+  
+  // Create enhanced response with cache headers
+  return new Response(responseClone.body, {
+    status: responseClone.status,
+    statusText: responseClone.statusText,
+    headers: headers
+  });
+}
+
+/**
+ * Cache a response and return it
+ * @param {Request} request - The fetch request
+ * @param {Response} response - The fetch response
+ * @param {string} resourceType - Type of resource
+ * @returns {Response} The original or enhanced response
+ */
+function cacheResponse(request, response, resourceType) {
+  if (!response || !response.ok) {
+    return response;
+  }
+  
+  const cacheableResponse = createCacheableResponse(response, resourceType);
+  const responseToCache = cacheableResponse.clone();
+  
+  caches.open(RUNTIME_CACHE)
+    .then(cache => {
+      cache.put(request, responseToCache);
+    })
+    .catch(err => {
+      console.error('[ServiceWorker] Error caching response:', err);
+    });
+  
+  return cacheableResponse;
+}
+
+/**
+ * Handle API requests (Network first, fallback to cache)
+ * @param {FetchEvent} event - The fetch event
+ * @returns {Promise<Response>} The response
+ */
+async function handleApiRequest(event) {
+  try {
+    const response = await fetch(event.request);
+    return cacheResponse(event.request, response, RESOURCE_TYPES.API);
+  } catch (error) {
+    const cachedResponse = await caches.match(event.request);
+    
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+    
+    // If it's a GET request for form data and we can't fetch or find in cache
+    // return an empty JSON response with offline indicator
+    const url = new URL(event.request.url);
+    if (url.pathname.includes('/api/form') && event.request.method === 'GET') {
+      return new Response(JSON.stringify({
+        success: false,
+        offline: true,
+        message: 'You are currently offline. Data will be available when you reconnect.',
+        data: []
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    throw error;
+  }
+}
+
+/**
+ * Handle image requests (Cache first, network fallback with generic image for failures)
+ * @param {FetchEvent} event - The fetch event
+ * @returns {Promise<Response>} The response
+ */
+async function handleImageRequest(event) {
+  const cachedResponse = await caches.match(event.request);
+  
+  if (cachedResponse) {
+    return cachedResponse;
+  }
+  
+  try {
+    const response = await fetch(event.request);
+    return cacheResponse(event.request, response, RESOURCE_TYPES.IMAGE);
+  } catch (error) {
+    // Return fallback image if fetch fails
+    return caches.match('/logo192.png');
+  }
+}
+
+/**
+ * Handle HTML navigation requests (Network first with offline fallback)
+ * @param {FetchEvent} event - The fetch event
+ * @returns {Promise<Response>} The response
+ */
+async function handleHtmlRequest(event) {
+  try {
+    const response = await fetch(event.request);
+    // Don't cache HTML responses for long to ensure freshness
+    return cacheResponse(event.request, response, RESOURCE_TYPES.HTML);
+  } catch (error) {
+    const cachedResponse = await caches.match('/offline.html');
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+    return caches.match('/index.html');
+  }
+}
+
+/**
+ * Handle static resource requests (Cache first, network fallback)
+ * @param {FetchEvent} event - The fetch event
+ * @returns {Promise<Response>} The response
+ */
+async function handleStaticRequest(event) {
+  const cachedResponse = await caches.match(event.request);
+  
+  if (cachedResponse) {
+    return cachedResponse;
+  }
+  
+  try {
+    const response = await fetch(event.request);
+    return cacheResponse(event.request, response, RESOURCE_TYPES.STATIC);
+  } catch (error) {
+    console.error('[ServiceWorker] Static resource fetch failed:', error);
+    throw error;
+  }
+}
+
+// Fetch event - apply different strategies based on request type
+self.addEventListener('fetch', event => {
   // Skip non-GET requests and cross-origin requests
+  const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || !url.origin.includes(self.location.origin)) {
     return;
   }
-
-  // API requests (Network first, fallback to cache)
-  if (isApiRequest(url)) {
-    event.respondWith(
-      fetch(event.request)
-        .then(response => {
-          const responseClone = response.clone();
-          caches.open(RUNTIME_CACHE).then(cache => {
-            cache.put(event.request, responseClone);
-          });
-          return response;
-        })
-        .catch(() => {
-          return caches.match(event.request)
-            .then(cachedResponse => {
-              if (cachedResponse) {
-                return cachedResponse;
-              }
-              // If it's a GET request for form data and we can't fetch or find in cache
-              // return an empty JSON response with offline indicator
-              if (url.pathname.includes('/api/form') && event.request.method === 'GET') {
-                return new Response(JSON.stringify({
-                  success: false,
-                  offline: true,
-                  message: 'You are currently offline. Data will be available when you reconnect.',
-                  data: []
-                }), {
-                  headers: { 'Content-Type': 'application/json' }
-                });
-              }
-            });
-        })
-    );
-    return;
+  
+  const resourceType = getResourceType(event.request);
+  
+  switch (resourceType) {
+    case RESOURCE_TYPES.API:
+      event.respondWith(handleApiRequest(event));
+      break;
+    case RESOURCE_TYPES.IMAGE:
+      event.respondWith(handleImageRequest(event));
+      break;
+    case RESOURCE_TYPES.HTML:
+      event.respondWith(handleHtmlRequest(event));
+      break;
+    case RESOURCE_TYPES.STATIC:
+    default:
+      event.respondWith(handleStaticRequest(event));
+      break;
   }
-
-  // Images (Cache first, network fallback with generic image for failures)
-  if (isImageRequest(url)) {
-    event.respondWith(
-      caches.match(event.request)
-        .then(cachedResponse => {
-          return cachedResponse || fetch(event.request)
-            .then(response => {
-              // Cache successful responses
-              const responseClone = response.clone();
-              caches.open(RUNTIME_CACHE).then(cache => {
-                cache.put(event.request, responseClone);
-              });
-              return response;
-            })
-            .catch(() => {
-              // Return fallback image if fetch fails
-              return caches.match('/logo192.png');
-            });
-        })
-    );
-    return;
-  }
-
-  // HTML navigation requests (Network first with offline fallback)
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .catch(() => {
-          return caches.match('/offline.html') || caches.match('/index.html');
-        })
-    );
-    return;
-  }
-
-  // Default strategy (Cache first, network fallback)
-  event.respondWith(
-    caches.match(event.request)
-      .then(cachedResponse => {
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-        
-        return fetch(event.request)
-          .then(response => {
-            // Don't cache responses with error status
-            if (!response || response.status !== 200) {
-              return response;
-            }
-
-            // Clone the response
-            const responseClone = response.clone();
-            caches.open(RUNTIME_CACHE)
-              .then(cache => {
-                cache.put(event.request, responseClone);
-              });
-
-            return response;
-          });
-      })
-  );
 });
 
 // Background sync for offline form submissions
@@ -178,7 +289,7 @@ self.addEventListener('sync', event => {
   if (event.tag === 'submit-form') {
     event.waitUntil(
       // Get all pending form submissions from IndexedDB
-      // and send them to the server
+      // and notify client to sync them
       self.clients.matchAll().then(clients => {
         clients.forEach(client => {
           client.postMessage({
@@ -187,6 +298,13 @@ self.addEventListener('sync', event => {
         });
       })
     );
+  }
+});
+
+// Listen for message events (for handling update requests)
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
   }
 });
 

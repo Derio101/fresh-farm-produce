@@ -2,9 +2,9 @@
   "name": "fresh-farm-produce",
   "version": "1.0.0",
   "scripts": {
-    "start": "node server/server.js",
+    "start": "cd server && npm start",
     "build": "cd client && npm run build",
-    "install-all": "npm install && cd server && npm install && cd ../client && npm install"
+    "install-all": "cd server && npm install && cd ../client && npm install"
   },
   "engines": {
     "node": ">=14.0.0"
