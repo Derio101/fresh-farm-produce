@@ -47,50 +47,36 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Enhanced MongoDB connection with retry logic
+// Simplified MongoDB connection with retry logic
 const connectDB = async (retries = 5, interval = 5000) => {
-  try {
-    // Parse MongoDB URI to ensure proper encoding
-    let uri = process.env.MONGODB_URI;
-    
-    // Extract components from URI for proper handling
-    const [prefix, suffix] = uri.split('@');
-    const [protocol, credentials] = prefix.split('://');
-    const [username, password] = credentials.split(':');
-    
-    // Reconstruct URI with properly encoded components
-    const encodedUri = `${protocol}://${username}:${encodeURIComponent(decodeURIComponent(password))}@${suffix}`;
-    
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        console.log(`MongoDB connection attempt ${attempt}/${retries}...`);
-        
-        const conn = await mongoose.connect(encodedUri, {
-          useNewUrlParser: true,
-          useUnifiedTopology: true,
-          serverSelectionTimeoutMS: 15000, // Increased timeout
-          socketTimeoutMS: 45000,
-        });
-        
-        console.log(`MongoDB Connected: ${conn.connection.host}`);
-        return true;
-      } catch (connectionError) {
-        console.error(`MongoDB connection error (attempt ${attempt}/${retries}): ${connectionError.message}`);
-        
-        if (attempt === retries) {
-          console.error(`All ${retries} connection attempts failed.`);
-          return false;
-        }
-        
-        // Wait before trying again
-        console.log(`Retrying in ${interval/1000} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, interval));
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`MongoDB connection attempt ${attempt}/${retries}...`);
+      
+      // Use the URI directly from environment variables
+      const conn = await mongoose.connect(process.env.MONGODB_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+        serverSelectionTimeoutMS: 15000, // Increased timeout
+        socketTimeoutMS: 45000,
+      });
+      
+      console.log(`MongoDB Connected: ${conn.connection.host}`);
+      return true;
+    } catch (error) {
+      console.error(`MongoDB connection error (attempt ${attempt}/${retries}): ${error.message}`);
+      
+      if (attempt === retries) {
+        console.error(`All ${retries} connection attempts failed.`);
+        return false;
       }
+      
+      // Wait before trying again
+      console.log(`Retrying in ${interval/1000} seconds...`);
+      await new Promise(resolve => setTimeout(resolve, interval));
     }
-  } catch (error) {
-    console.error(`Error in MongoDB connection setup: ${error.message}`);
-    return false;
   }
+  return false;
 };
 
 // Add connection event listeners
