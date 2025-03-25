@@ -10,7 +10,16 @@ const path = require('path');
 const formRoutes = require('./routes/formRoutes');
 const errorHandler = require('./middleware/errorHandler');
 const deepseekService = require('./services/deepseekService');
-const fetch = require('node-fetch'); // Add this for self-ping if not already there
+
+// Conditional import for fetch based on Node.js version
+let fetch;
+try {
+  // For Node.js >= 18
+  fetch = globalThis.fetch;
+} catch (e) {
+  // For Node.js < 18
+  fetch = require('node-fetch');
+}
 
 // Load environment variables
 dotenv.config();
