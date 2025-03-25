@@ -1,22 +1,11 @@
 {
-  "name": "fresh-farm-api",
+  "name": "fresh-farm-produce",
   "version": "1.0.0",
-  "description": "API for Fresh Farm Produce",
-  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^10.0.0",
-    "express": "^4.17.1",
-    "mongoose": "^6.0.12",
-    "node-fetch": "^2.6.9",
-    "socket.io": "^4.4.0"
-  },
-  "devDependencies": {
-    "nodemon": "^2.0.14"
+    "start": "cd server && npm start",
+    "build": "cd client && npm run build",
+    "install-all": "cd server && npm install && cd ../client && npm install",
+    "postinstall": "cd server && npm install"
   },
   "engines": {
     "node": ">=14.0.0 <19.0.0"
