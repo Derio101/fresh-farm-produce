@@ -3,82 +3,104 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#1b5e20">
   <title>Fresh Farm Produce - Offline</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-      background-color: #f0f9f0;
+      background-color: #f8f9fa;
       color: #333;
+      margin: 0;
+      padding: 0;
       display: flex;
       flex-direction: column;
+      min-height: 100vh;
+    }
+    
+    header {
+      background-color: #1b5e20;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    main {
+      flex: 1;
+      display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
-      margin: 0;
-      padding: 20px;
+      padding: 2rem;
+    }
+    
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      padding: 2rem;
+      max-width: 500px;
       text-align: center;
     }
-    .container {
-      max-width: 500px;
-      background-color: white;
-      border-radius: 10px;
-      padding: 30px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    .logo {
-      width: 100px;
-      height: 100px;
-      margin-bottom: 20px;
-    }
+    
     h1 {
+      margin-top: 0;
       color: #1b5e20;
-      margin-bottom: 15px;
     }
+    
     p {
       line-height: 1.6;
-      margin-bottom: 20px;
+      color: #555;
     }
-    .btn {
-      background-color: #2e7d32;
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      border-radius: 4px;
-      font-weight: bold;
-      cursor: pointer;
-      transition: background-color 0.3s;
-      text-decoration: none;
-      display: inline-block;
-    }
-    .btn:hover {
-      background-color: #1b5e20;
-    }
+    
     .icon {
-      font-size: 50px;
-      margin-bottom: 20px;
-      color: #1b5e20;
+      font-size: 64px;
+      margin-bottom: 1rem;
+    }
+    
+    .button {
+      display: inline-block;
+      background-color: #1b5e20;
+      color: white;
+      padding: 0.75rem 1.5rem;
+      border-radius: 4px;
+      text-decoration: none;
+      margin-top: 1rem;
+      font-weight: bold;
+    }
+    
+    footer {
+      background-color: #f1f1f1;
+      padding: 1rem;
+      text-align: center;
+      color: #666;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="icon">📡</div>
-    <h1>You're Offline</h1>
-    <p>Sorry, it looks like you don't have an internet connection right now. Some features of Fresh Farm Produce may not be available.</p>
-    <p>You can still browse previously loaded content, but you'll need to reconnect to submit forms or see the latest updates.</p>
-    <button class="btn" onclick="tryReconnect()">Try Again</button>
-  </div>
-
+  <header>
+    <h1>Fresh Farm Produce</h1>
+  </header>
+  
+  <main>
+    <div class="card">
+      <div class="icon">📵</div>
+      <h1>You're Offline</h1>
+      <p>Looks like you're not connected to the internet right now. Some features of Fresh Farm Produce require an internet connection.</p>
+      <p>Don't worry! Any forms you submit while offline will be stored and automatically sent when you reconnect.</p>
+      <button class="button" onclick="window.location.reload()">Try Again</button>
+    </div>
+  </main>
+  
+  <footer>
+    <p>&copy; 2023 Fresh Farm Produce. All rights reserved.</p>
+  </footer>
+  
   <script>
-    function tryReconnect() {
-      window.location.reload();
-    }
-
-    // Check if we come back online
-    window.addEventListener('online', () => {
-      window.location.reload();
-    });
+    // Check periodically if connection is restored
+    setInterval(() => {
+      if (navigator.onLine) {
+        window.location.reload();
+      }
+    }, 5000);
   </script>
 </body>
 </html>
