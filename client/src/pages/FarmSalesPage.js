@@ -5,10 +5,11 @@ import LoadingSpinner from '../components/common/LoadingSpinner';
 import OfflineAlert from '../components/common/OfflineAlert';
 import SubmissionList from '../components/submissions/SubmissionList';
 import SubmissionDetails from '../components/submissions/SubmissionDetails';
-import { fetchSubmissions, deleteSubmission } from '../services/api';
+import { fetchSubmissions, deleteSubmission, checkHealth } from '../services/api';
 
 /**
  * Farm Sales Page component to display form submissions
+ * Enhanced with server wake-up handling for Render platform
  * @param {object} props - Component props
  * @param {object} props.formData - Form data that was just submitted
  */
@@ -21,6 +22,8 @@ function FarmSalesPage({ formData }) {
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [messageAnalyses, setMessageAnalyses] = useState({});
   const [deleteStatus, setDeleteStatus] = useState({ inProgress: false, error: null });
+  const [serverWaking, setServerWaking] = useState(false);
+  const [healthStatus, setHealthStatus] = useState(null);
   
   // Sync pending forms with server when online
   const syncPendingForms = async () => {
@@ -62,12 +65,42 @@ function FarmSalesPage({ formData }) {
     loadSubmissions();
   }, []);
   
+  // Function to check server health
+  const checkServerHealth = async () => {
+    try {
+      console.log('Checking server health...');
+      setServerWaking(true);
+      
+      const health = await checkHealth();
+      console.log('Server health response:', health);
+      
+      setHealthStatus(health);
+      
+      if (health.mongodb !== 'Connected') {
+        console.warn('MongoDB not connected:', health.mongodb);
+        // Keep server waking status true to indicate issues
+      } else {
+        setServerWaking(false);
+      }
+      
+      return health;
+    } catch (error) {
+      console.error('Health check failed:', error);
+      setHealthStatus({ status: 'error', error: error.message });
+      // Keep server waking status true to indicate issues
+      return null;
+    }
+  };
+  
   // Function to load submissions from server or cache
   const loadSubmissions = async () => {
     setLoading(true);
     setLoadError(null);
     
     try {
+      // Check server health first
+      await checkServerHealth();
+      
       // If offline, use cached data from IndexedDB instead
       if (isOffline) {
         // Import the IndexedDB helper dynamically
@@ -113,40 +146,90 @@ function FarmSalesPage({ formData }) {
         return;
       }
       
-      // Online path - fetch from server
+      // Online path - fetch from server with cold start handling
       try {
-        const result = await fetchSubmissions();
+        // Handle potential server wake-up time
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Request is taking longer than expected. The server might be waking up.')), 5000)
+        );
         
-        if (result.success) {
-          // Combine server submissions with pending forms
-          const combinedData = [
-            ...pendingForms.map(form => ({
-              ...form,
-              _id: form.id,
-              isPending: true
-            })),
-            ...result.data
-          ];
+        const resultPromise = fetchSubmissions();
+        
+        try {
+          // First try with shorter timeout
+          const result = await Promise.race([resultPromise, timeoutPromise]);
+          setServerWaking(false);
           
-          setSubmissions(combinedData);
-          
-          // Set selected submission
-          if (combinedData.length > 0) {
-            setSelectedSubmission(combinedData[0]);
-          } else if (formData) {
-            setSelectedSubmission({...formData, isPending: true});
+          if (result.success) {
+            // Process result normally
+            const combinedData = [
+              ...pendingForms.map(form => ({
+                ...form,
+                _id: form.id,
+                isPending: true
+              })),
+              ...result.data
+            ];
+            
+            setSubmissions(combinedData);
+            
+            // Set selected submission
+            if (combinedData.length > 0) {
+              setSelectedSubmission(combinedData[0]);
+            } else if (formData) {
+              setSelectedSubmission({...formData, isPending: true});
+            }
+          } else {
+            throw new Error(result.message || 'Failed to load submissions');
           }
-        } else {
-          throw new Error(result.message || 'Failed to load submissions');
+        } catch (timeoutError) {
+          if (timeoutError.message.includes('taking longer')) {
+            // If timed out due to server waking up, show message but keep waiting
+            console.log('Server seems to be waking up, continuing to wait for the actual response...');
+            
+            // Update UI to show server is waking up
+            setServerWaking(true);
+            
+            // Continue with the original promise
+            const result = await resultPromise;
+            setServerWaking(false);
+            
+            if (result.success) {
+              // Process result normally after extended wait
+              const combinedData = [
+                ...pendingForms.map(form => ({
+                  ...form,
+                  _id: form.id,
+                  isPending: true
+                })),
+                ...result.data
+              ];
+              
+              setSubmissions(combinedData);
+              
+              // Set selected submission
+              if (combinedData.length > 0) {
+                setSelectedSubmission(combinedData[0]);
+              } else if (formData) {
+                setSelectedSubmission({...formData, isPending: true});
+              }
+            } else {
+              throw new Error(result.message || 'Failed to load submissions');
+            }
+          } else {
+            // For other errors, re-throw
+            throw timeoutError;
+          }
         }
       } catch (error) {
+        setServerWaking(false);
         throw error;
       }
     } catch (error) {
       console.error('Error fetching submissions:', error);
       setLoadError(
         error.name === 'AbortError'
-          ? 'Connection to server timed out. Please check if the server is running.'
+          ? 'Connection to server timed out. The server might be starting up. Please wait a moment and try again.'
           : `Error loading submissions: ${error.message}`
       );
       
@@ -277,6 +360,17 @@ function FarmSalesPage({ formData }) {
           <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded mb-4">
             <p><strong>Error:</strong> {loadError}</p>
           </div>
+          {serverWaking && (
+            <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-700 rounded mb-4">
+              <div className="flex items-center">
+                <svg className="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p>The server appears to be waking up. This might take a few seconds on the first load...</p>
+              </div>
+            </div>
+          )}
           <button 
             onClick={loadSubmissions} 
             className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
@@ -307,6 +401,24 @@ function FarmSalesPage({ formData }) {
       <h1 className="text-3xl font-bold text-green-800 mb-6">Farm Sales Information</h1>
       
       <OfflineAlert />
+      
+      {serverWaking && (
+        <div className="mb-4 p-3 bg-yellow-100 border border-yellow-400 text-yellow-700 rounded">
+          <div className="flex items-center">
+            <svg className="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p>The server appears to be waking up. This might take a few seconds to fully load...</p>
+          </div>
+        </div>
+      )}
+      
+      {healthStatus && healthStatus.mongodb && healthStatus.mongodb !== 'Connected' && (
+        <div className="mb-4 p-3 bg-orange-100 border border-orange-400 text-orange-800 rounded">
+          <p><strong>Database Status:</strong> {healthStatus.mongodb}. Some features may be limited.</p>
+        </div>
+      )}
       
       {deleteStatus.error && (
         <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
